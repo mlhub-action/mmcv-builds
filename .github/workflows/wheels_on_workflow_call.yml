@@ -1,0 +1,133 @@
+name: Build mmcv wheels on workflow call
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      python:
+        required: true
+        type: string
+      torch_version:
+        required: true
+        type: string
+      cuda_short_version:
+        required: true
+        type: string
+      arch_list:
+        required: true
+        type: string
+      publish:
+        required: true
+        type: boolean
+      ref:
+        required: true
+        type: string
+
+env:
+  TORCH_CUDA_ARCH_LIST: ${{ inputs.arch_list }}
+  FORCE_CUDA: 1
+  MMCV_WITH_OPS: 1
+  MAX_JOBS: 1 # will crash otherwise
+  DISTUTILS_USE_SDK: 1 # otherwise distutils will complain on windows about multiple versions of msvc
+
+jobs:
+  build_wheels:
+    name: ${{ inputs.os }}-py${{ inputs.python }}-torch${{ inputs.torch_version }}+cu${{ inputs.cuda_short_version }}
+    runs-on: ${{ inputs.os }}
+    env:
+      # alias for the current python version
+      # windows does not have per version binary, it is just 'python3'
+      PY: python${{ contains(inputs.os, 'ubuntu') && inputs.python || '3' }}
+
+    container: ${{ contains(inputs.os, 'ubuntu') && 'quay.io/pypa/manylinux2014_x86_64' || null }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Recursive checkout
+        uses: actions/checkout@v3
+        with:
+          repository: open-mmlab/mmcv
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          path: "."
+          fetch-depth: 0 # for tags
+
+      - name: Checkout latest setup.py
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}
+          path: "latest"
+
+      - name: Copy latest setup.py
+        run: |
+          cp latest/setup.py setup.py
+
+      - name: Set short git commit SHA
+        id: commit
+        run: |
+          set -Eeuo pipefail
+          git config --global --add safe.directory "*"
+          sha=$(git rev-parse --short HEAD)
+          echo "sha=$sha" >> $GITHUB_OUTPUT
+
+      - name: Confirm git commit SHA output
+        run: echo ${{ steps.commit.outputs.sha }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          path: workflows
+
+      - if: runner.os == 'Linux'
+        name: (Linux) Setup Runner
+        uses: ./workflows/.github/actions/setup-linux-runner
+        with:
+          cuda_version: ${{ inputs.cuda_short_version }}
+          python_version: ${{ inputs.python }}
+
+      - if: runner.os == 'Windows'
+        name: (Windows) Setup Runner
+        uses: ./workflows/.github/actions/setup-windows-runner
+        with:
+          cuda_version: ${{ inputs.cuda_short_version }}
+          python_version: ${{ inputs.python }}
+
+      - name: Define version
+        id: define
+        run: |
+          set -Eeuo pipefail
+          git config --global --add safe.directory "*"
+          cp mmcv/version.py .
+          version=`$PY -c "from version import *; print(__version__)"`
+          echo "BUILD_VERSION=$version" >> ${GITHUB_ENV}
+          cat ${GITHUB_ENV}
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Setup proper pytorch dependency in "requirements.txt"
+        run: |
+          sed -i '/torch/d' ./requirements/optional.txt
+          echo "torch == ${{ inputs.torch_version }}" >> ./requirements/optional.txt
+          cat ./requirements/optional.txt
+          ninja=`$PY -c "import sys; print(sys.exec_prefix + '/bin')"`
+          echo "$ninja" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: $PY -m pip install wheel setuptools -r ./requirements/optional.txt --extra-index-url https://download.pytorch.org/whl/cu${{ inputs.cuda_short_version }}
+
+      - name: Build wheel
+        run: $PY setup.py bdist_wheel -d dist/ -k $PLAT_ARG
+        env:
+          PLAT_ARG: ${{ contains(inputs.os, 'ubuntu') && '--plat-name manylinux2014_x86_64' || '' }}
+
+      - name: Rename wheel # PEP File name convention
+        run: |
+          for f in dist/*.whl; do mv "$f" "$(echo "$f" | sed s/${{ steps.define.outputs.version }}/${{ steps.define.outputs.version }}+git.${{ steps.commit.outputs.sha }}+torch${{ inputs.torch_version }}+cu${{ inputs.cuda_short_version }}/)"; done
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.os }}-mmcv_full-${{ steps.define.outputs.version }}+git.${{ steps.commit.outputs.sha }}+torch${{ inputs.torch_version }}+cu${{ inputs.cuda_short_version }}-py${{ inputs.python }}
+          path: dist/*.whl

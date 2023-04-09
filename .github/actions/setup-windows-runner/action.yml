@@ -1,0 +1,54 @@
+name: Set up Windows Runner
+
+inputs:
+  cuda_version:
+    description: Cuda version to install
+    type: string
+    required: true
+  python_version:
+    description: Python version to install
+    type: string
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - id: cuda-toolkit
+      shell: python
+      run: |
+        import os
+        import sys
+        print(sys.version)
+        # https://developer.nvidia.com/cuda-toolkit-archive
+        version = {
+          "118": "11.8.0",
+          "117": "11.7.1",
+        }["${{ inputs.cuda_version }}"]
+        with open(os.environ['GITHUB_OUTPUT'], "r+") as fp:
+          fp.write("version=" + version + "\n")
+
+    - name: Install cuda
+      uses: okazunori2013/cuda-toolkit@v0.3.3
+      with:
+        cuda: ${{ steps.cuda-toolkit.outputs.version }}
+        method: network
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Configure Pagefile
+      # windows runners will OOM with many CUDA architectures
+      # we cheat here with a page file
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+
+    # really unfortunate: https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Remove link.exe
+      shell: bash
+      run: rm /usr/bin/link

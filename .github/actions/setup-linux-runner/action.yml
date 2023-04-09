@@ -1,0 +1,36 @@
+name: Set up Linux Runner
+
+inputs:
+  cuda_version:
+    description: Cuda version to install
+    type: string
+    required: true
+  python_version:
+    description: Python version to install
+    type: string
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - id: cuda-toolkit
+      shell: python
+      run: |
+        import os
+        import sys
+        print(sys.version)
+        # https://developer.nvidia.com/cuda-toolkit-archive
+        runfile = {
+          "118": "https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run",
+          "117": "https://developer.download.nvidia.com/compute/cuda/11.7.1/local_installers/cuda_11.7.1_515.65.01_linux.run",
+        }["${{ inputs.cuda_version }}"]
+        with open(os.environ['GITHUB_OUTPUT'], "r+") as fp:
+          fp.write("runfile=" + runfile + "\n")
+
+    - name: Install cuda
+      shell: bash
+      run: >
+        yum install wget git prename -y &&
+        wget -q "${{ steps.cuda-toolkit.outputs.runfile }}" -O installer.run &&
+        sh ./installer.run --silent --toolkit &&
+        rm ./installer.run
