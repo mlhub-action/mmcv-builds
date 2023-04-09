@@ -1,0 +1,62 @@
+name: Build mmcv wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "mmcv branch, tag or SHA to checkout"
+        type: string
+        required: true
+
+jobs:
+  build_wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - windows-2019
+        python:
+          - "3.9"
+          - "3.10"
+        config:
+          # https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
+          - torch_version: "2.0.0"
+            cuda_short_version: "118"
+            arch_list: "7.0 7.5 8.0 8.6 8.9"
+            publish: true
+
+          # https://download.openmmlab.com/mmcv/dist/cu117/torch1.13/index.html
+          - torch_version: "1.13.1"
+            cuda_short_version: "117"
+            arch_list: "7.0 7.5 8.0 8.6"
+            publish: true
+
+    uses: ./.github/workflows/wheels_on_workflow_call.yml
+    permissions:
+      contents: write
+    with:
+      os: ${{ matrix.os }}
+      python: ${{ matrix.python }}
+      torch_version: ${{ matrix.config.torch_version }}
+      cuda_short_version: ${{ matrix.config.cuda_short_version }}
+      arch_list: ${{ matrix.config.arch_list }}
+      publish: ${{ matrix.config.publish}}
+      ref: ${{ inputs.ref }}
+
+  release_wheels:
+    needs: [build_wheels]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - id: get-artifact
+        uses: actions/download-artifact@v3
+      - id: release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "*/*.whl"
+          name: "mmcv-full wheels"
+          tag: ${{ github.run_id }}
+          commit: ${{ github.sha }}
+          body: "https://github.com/open-mmlab/mmcv/commit/${{ inputs.ref }}"
