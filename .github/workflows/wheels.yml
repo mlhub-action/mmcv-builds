@@ -21,15 +21,9 @@ jobs:
           - "3.10"
         config:
           # https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
-          - torch_version: "2.0.0"
+          - torch_version: "2.0.1"
             cuda_short_version: "118"
             arch_list: "7.0 7.5 8.0 8.6 8.9"
-            publish: true
-
-          # https://download.openmmlab.com/mmcv/dist/cu117/torch1.13/index.html
-          - torch_version: "1.13.1"
-            cuda_short_version: "117"
-            arch_list: "7.0 7.5 8.0 8.6"
             publish: true
 
     uses: ./.github/workflows/wheels_on_workflow_call.yml
